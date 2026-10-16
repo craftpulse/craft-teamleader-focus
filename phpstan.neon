@@ -5,7 +5,3 @@ parameters:
     level: 5
     paths:
         - src
-    ignoreErrors:
-        -
-            identifier: class.missingExtends
-            path: src/fields/formie/ClientType.php

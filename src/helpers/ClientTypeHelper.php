@@ -45,7 +45,7 @@ class ClientTypeHelper
             return ClientType::TYPE_COMPANY;
         }
 
-        foreach ($form->getCustomFields() as $field) {
+        foreach ($form->getFields() as $field) {
             if ($field instanceof ClientType) {
                 $value = $submission->getFieldValue($field->handle);
 

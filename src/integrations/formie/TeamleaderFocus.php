@@ -32,10 +32,13 @@ use Twig\Error\SyntaxError;
 
 use verbb\auth\base\OAuthProviderInterface;
 use verbb\auth\models\Token;
+use verbb\formie\attributes\FormIntegrationSetting;
 use verbb\formie\base\Crm;
+use verbb\formie\base\FormInterface;
 use verbb\formie\base\Integration;
 use verbb\formie\elements\Submission;
 use verbb\formie\errors\IntegrationException;
+use verbb\formie\helpers\SchemaHelper;
 use verbb\formie\models\IntegrationField;
 use verbb\formie\models\IntegrationFormSettings;
 
@@ -72,68 +75,81 @@ class TeamleaderFocus extends Crm implements OAuthProviderInterface
     /**
      * @var bool Whether to link the contact to the company.
      */
+    #[FormIntegrationSetting]
     public bool $linkToCompany = false;
 
     /**
      * @var bool Whether to map form submissions to Teamleader Focus contacts.
      */
+    #[FormIntegrationSetting]
     public bool $mapToContacts = false;
 
     /**
      * @var bool Whether to map form submissions to Teamleader Focus companies.
      */
+    #[FormIntegrationSetting]
     public bool $mapToCompanies = false;
 
     /**
      * @var bool Whether to map form submissions to Teamleader Focus deals.
      */
+    #[FormIntegrationSetting]
     public bool $mapToDeals = false;
 
     /**
      * @var bool Whether to update custom fields partially for contacts.
      */
+    #[FormIntegrationSetting]
     public bool $partialUpdateCustomFieldsContacts = true;
 
     /**
      * @var bool Whether to update custom fields partially for companies.
      */
+    #[FormIntegrationSetting]
     public bool $partialUpdateCustomFieldsCompanies = true;
 
     /**
      * @var string The default currency for deals when not mapped from a form field.
      */
+    #[FormIntegrationSetting]
     public string $defaultCurrency = 'EUR';
 
     /**
      * @var string|null The title to use for created deals when no form field is mapped.
      */
+    #[FormIntegrationSetting]
     public ?string $dealTitle = null;
 
     /**
      * @var array|null Field mapping configuration for contacts.
      */
+    #[FormIntegrationSetting]
     public ?array $contactsFieldMapping = null;
 
     /**
      * @var array|null Field mapping configuration for companies.
      */
+    #[FormIntegrationSetting]
     public ?array $companiesFieldMapping = null;
 
     /**
      * @var array|null Field mapping configuration for deals.
      */
+    #[FormIntegrationSetting]
     public ?array $dealsFieldMapping = null;
 
     /**
      * @var bool Whether to append new tags to existing contact tags instead of replacing them.
      *           When enabled, makes an additional API call to fetch existing tags before update.
      */
+    #[FormIntegrationSetting]
     public bool $appendContactTags = false;
 
     /**
      * @var bool Whether to append new tags to existing company tags instead of replacing them.
      *           When enabled, makes an additional API call to fetch existing tags before update.
      */
+    #[FormIntegrationSetting]
     public bool $appendCompanyTags = false;
 
 
@@ -232,21 +248,6 @@ class TeamleaderFocus extends Crm implements OAuthProviderInterface
     }
 
     /**
-     * @throws Exception
-     * @throws LoaderError
-     * @throws RuntimeError
-     * @throws SyntaxError
-     *
-     * @author CraftPulse
-     */
-    public function getFormSettingsHtml($form): string
-    {
-        $formSettings = $this->getFormSettingsHtmlVariables($form);
-
-        return Craft::$app->getView()->renderTemplate('teamleader-focus/integrations/formie/_form-settings', $formSettings);
-    }
-
-    /**
      * @author CraftPulse
      */
     public function getApiDomain(): string
@@ -315,11 +316,11 @@ class TeamleaderFocus extends Crm implements OAuthProviderInterface
         try {
             $isCompanyRequest = ClientTypeHelper::isCompanyRequest($submission);
 
-            $contactValues = $this->getFieldMappingValues($submission, $this->contactsFieldMapping, 'contacts');
+            $contactValues = $this->_withoutEmptyValues($this->getFieldMappingValues($submission, $this->contactsFieldMapping, 'contacts'));
             $companyValues = $isCompanyRequest
-                ? $this->getFieldMappingValues($submission, $this->companiesFieldMapping, 'companies')
+                ? $this->_withoutEmptyValues($this->getFieldMappingValues($submission, $this->companiesFieldMapping, 'companies'))
                 : [];
-            $dealsValues = $this->getFieldMappingValues($submission, $this->dealsFieldMapping, 'deals');
+            $dealsValues = $this->_withoutEmptyValues($this->getFieldMappingValues($submission, $this->dealsFieldMapping, 'deals'));
 
             // Pull tags out of the value array so the main payload doesn't carry them.
             $tags = $this->_normalizeTagsValue($contactValues['tags'] ?? []);
@@ -750,8 +751,127 @@ class TeamleaderFocus extends Crm implements OAuthProviderInterface
         }
     }
 
+    // Protected Methods
+    // =========================================================================
+
+    /**
+     * Per-form settings UI on the form's Integrations tab. Every property
+     * targeted here must carry `#[FormIntegrationSetting]`, otherwise Formie
+     * neither saves it per form nor applies it when a submission is sent.
+     *
+     * @author CraftPulse
+     * @since  6.0.0
+     */
+    protected function defineFormSettingsSchema(FormInterface $form): array
+    {
+        $displayName = static::displayName();
+        $schema = parent::defineFormSettingsSchema($form);
+
+        $schema[] = SchemaHelper::lightswitchField([
+            'label' => Craft::t('formie', 'Map to Contacts'),
+            'instructions' => Craft::t('formie', 'Whether to map form data to {name} {label}.', ['name' => $displayName, 'label' => 'Contacts']),
+            'name' => 'mapToContacts',
+        ]);
+        $schema[] = $this->createFieldMappingField([
+            'name' => 'contactsFieldMapping',
+            'if' => 'mapToContacts',
+            'dataLabel' => 'Contacts',
+            'dataKey' => 'contacts',
+        ]);
+        $schema[] = SchemaHelper::lightswitchField([
+            'label' => Craft::t('formie', 'Append Tags'),
+            'instructions' => Craft::t('formie', "When enabled, submitted tags will be added to the contact's existing tags. When disabled, submitted tags will replace all existing tags."),
+            'name' => 'appendContactTags',
+            'if' => 'mapToContacts',
+        ]);
+        $schema[] = SchemaHelper::lightswitchField([
+            'label' => Craft::t('formie', 'Update custom fields partially'),
+            'instructions' => Craft::t('formie', 'When enabled, only the values of specific custom fields of a contact will be updated, leaving the remaining ones unchanged. When disabled, all custom fields will be replaced completely.'),
+            'name' => 'partialUpdateCustomFieldsContacts',
+            'if' => 'mapToContacts',
+        ]);
+
+        $schema[] = SchemaHelper::separator();
+        $schema[] = SchemaHelper::lightswitchField([
+            'label' => Craft::t('formie', 'Map to Companies'),
+            'instructions' => Craft::t('formie', 'Whether to map form data to {name} {label}.', ['name' => $displayName, 'label' => 'Companies']),
+            'name' => 'mapToCompanies',
+        ]);
+        $schema[] = SchemaHelper::lightswitchField([
+            'label' => Craft::t('formie', 'Link user to company'),
+            'instructions' => Craft::t('formie', 'Whether the user should be linked to the created company.'),
+            'name' => 'linkToCompany',
+            'if' => 'mapToCompanies',
+        ]);
+        $schema[] = $this->createFieldMappingField([
+            'name' => 'companiesFieldMapping',
+            'if' => 'mapToCompanies',
+            'dataLabel' => 'Companies',
+            'dataKey' => 'companies',
+        ]);
+        $schema[] = SchemaHelper::lightswitchField([
+            'label' => Craft::t('formie', 'Append Tags'),
+            'instructions' => Craft::t('formie', "When enabled, submitted tags will be added to the company's existing tags. When disabled, submitted tags will replace all existing tags."),
+            'name' => 'appendCompanyTags',
+            'if' => 'mapToCompanies',
+        ]);
+        $schema[] = SchemaHelper::lightswitchField([
+            'label' => Craft::t('formie', 'Update custom fields partially'),
+            'instructions' => Craft::t('formie', 'When enabled, only the values of specific custom fields of a company will be updated, leaving the remaining ones unchanged. When disabled, all custom fields will be replaced completely.'),
+            'name' => 'partialUpdateCustomFieldsCompanies',
+            'if' => 'mapToCompanies',
+        ]);
+
+        $schema[] = SchemaHelper::separator();
+        $schema[] = SchemaHelper::lightswitchField([
+            'label' => Craft::t('formie', 'Map to Deals'),
+            'instructions' => Craft::t('formie', 'Whether to map form data to {name} {label}.', ['name' => $displayName, 'label' => 'Deals']),
+            'name' => 'mapToDeals',
+        ]);
+        $schema[] = SchemaHelper::textField([
+            'label' => Craft::t('formie', 'Deal Title'),
+            'instructions' => Craft::t('formie', 'Enter a title to use for the created deal.'),
+            'name' => 'dealTitle',
+            'required' => true,
+            'if' => 'mapToDeals',
+        ]);
+        $schema[] = SchemaHelper::comboboxField([
+            'label' => Craft::t('formie', 'Default Currency'),
+            'instructions' => Craft::t('formie', 'The default currency for deal values when not mapped from a form field.'),
+            'name' => 'defaultCurrency',
+            'options' => $this->getCurrencyOptions(),
+            'if' => 'mapToDeals',
+        ]);
+        $schema[] = $this->createFieldMappingField([
+            'name' => 'dealsFieldMapping',
+            'if' => 'mapToDeals',
+            'dataLabel' => 'Deals',
+            'dataKey' => 'deals',
+        ]);
+
+        return $schema;
+    }
+
     // Private Methods
     // =========================================================================
+
+    /**
+     * Drop mapped fields that resolved to an empty value (null, '' or []).
+     *
+     * Formie's getFieldMappingValues() returns every mapped field, including
+     * empty ones. Sending them would e.g. add an empty primary email or address,
+     * which the Teamleader API rejects.
+     *
+     * @param  array<string, mixed> $values
+     * @return array<string, mixed>
+     *
+     * @author CraftPulse
+     * @since  6.0.0
+     */
+    private function _withoutEmptyValues(array $values): array
+    {
+        return array_filter($values, fn(mixed $value) => $value !== null && $value !== '' && $value !== []);
+    }
 
     /**
      * Normalize tags from Formie: process arrays and single comma-separated strings.

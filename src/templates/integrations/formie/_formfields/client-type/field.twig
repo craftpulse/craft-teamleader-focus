@@ -1,0 +1,17 @@
+{# Front-end input. Tags come from ClientType::defineSlotTag(). #}
+{% set value = value is not empty ? value : field.defaultValue %}
+
+{% fieldtag 'fieldOptions' %}
+    {% for option in field.getFieldOptions() %}
+        {% fieldtag 'fieldOption' %}
+            {{ fieldtag('fieldInput', {
+                value: option.value,
+                checked: option.value == value,
+            }) }}
+
+            {% fieldtag 'fieldOptionLabel' %}
+                {{- option.label -}}
+            {% endfieldtag %}
+        {% endfieldtag %}
+    {% endfor %}
+{% endfieldtag %}
